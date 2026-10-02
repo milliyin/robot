@@ -1,0 +1,9 @@
+1 / q  -> S1 base left/right
+2 / w  -> S2 shoulder up/down
+3 / e  -> S3 elbow
+4 / r  -> S4 wrist pitch
+5 / t  -> S5 wrist roll
+o / p  -> gripper open/close
+h      -> home pose
+x      -> print tool0 XYZ
+Esc    -> quit

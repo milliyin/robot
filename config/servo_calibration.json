@@ -1,0 +1,62 @@
+{
+  "joints": {
+    "s1": {
+      "joint_name": "joint_1_base",
+      "reference_deg": 0.0,
+      "reference_pwm": 284,
+      "min_deg": -130.0,
+      "max_deg": 95.0,
+      "min_pwm": 540,
+      "max_pwm": 90,
+      "safe_pwm": [90, 540]
+    },
+    "s2": {
+      "joint_name": "joint_2_shoulder",
+      "reference_deg": 0.0,
+      "reference_pwm": 200,
+      "min_deg": -57.0,
+      "max_deg": 90.0,
+      "min_pwm": 75,
+      "max_pwm": 420,
+      "safe_pwm": [75, 420]
+    },
+    "s3": {
+      "joint_name": "joint_3_elbow",
+      "reference_deg": 0.0,
+      "reference_pwm": 550,
+      "min_deg": 0.0,
+      "max_deg": 142.0,
+      "min_pwm": 550,
+      "max_pwm": 250,
+      "safe_pwm": [250, 550]
+    },
+    "s4": {
+      "joint_name": "joint_4_wrist_pitch",
+      "reference_deg": 0.0,
+      "reference_pwm": 150,
+      "min_deg": -35.0,
+      "max_deg": 140.0,
+      "min_pwm": 75,
+      "max_pwm": 470,
+      "safe_pwm": [75, 470]
+    },
+    "s5": {
+      "joint_name": "joint_5_wrist_roll",
+      "reference_deg": 0.0,
+      "reference_pwm": 190,
+      "min_deg": -52.0,
+      "max_deg": 160.0,
+      "min_pwm": 75,
+      "max_pwm": 555,
+      "safe_pwm": [75, 555]
+    }
+  },
+  "gripper": {
+    "key": "s6",
+    "max_opening_m": 0.052,
+    "open_pwm": 250,
+    "closed_pwm": 400,
+    "safe_pwm": [250, 400]
+  },
+  "startup_pwm": [284, 200, 550, 150, 190, 250]
+}
