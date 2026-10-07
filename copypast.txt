@@ -1,13 +1,45 @@
-On the Jetson, from inside the repo folder, run these in order:
+# Jetson Nano setup and run commands
+
+cd ~/robot
+
+# Check Python 3.8 and pip
+python3.8 --version
+python3.8 -m pip --version
+
+# System packages for I2C tools
 sudo apt update
-sudo apt install -y python3-pip python3-smbus i2c-tools
-pip3 install -r requirements.txt
-pip3 install -r requirements-jetson.txt
-Check PCA9685 is visible on I2C:
+sudo apt install -y i2c-tools python3-smbus
+
+# Install Python dependencies with Python 3.8
+python3.8 -m pip install --upgrade pip==25.0.1
+python3.8 -m pip install -r requirements.txt
+python3.8 -m pip install -r requirements-jetson.txt
+
+# If Jetson.GPIO still fails, run this directly
+python3.8 -m pip install Jetson.GPIO adafruit-blinka adafruit-circuitpython-pca9685
+
+# Check PCA9685 appears on I2C bus.
+# You should see 40 in the table.
 i2cdetect -y -r 1
-You should see 40 in the table, usually address 0x40.
-Then run simulation + direct Jetson PCA9685 hardware:
-python3 main.py --jetson-pca9685 --no-gui
-If you want PyBullet GUI on Jetson, try:
-python3 main.py --jetson-pca9685
-But --no-gui is safer on Jetson.
+
+# Check Python hardware imports
+python3.8 -c "import Jetson.GPIO; import board; import busio; import adafruit_pca9685; print('PCA9685 libs OK')"
+
+# Run simulation only, no hardware
+python3.8 main.py --no-gui
+
+# Run direct Jetson -> PCA9685 hardware mode
+python3.8 main.py --jetson-pca9685 --no-gui
+
+# If your PCA9685 is not at 0x40, replace the address
+python3.8 main.py --jetson-pca9685 --i2c-address 0x40 --no-gui
+
+# Useful controls after launch:
+# h = Home
+# a = Pose A
+# b = Pose B
+# c = Pose C
+# 1/q, 2/w, 3/e, 4/r, 5/t = manual joints
+# o/p = gripper
+# x = print tool0 xyz
+# Esc = quit
