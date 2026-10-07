@@ -1,6 +1,6 @@
 import math
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Union
 
 import pybullet as p
 
@@ -15,7 +15,7 @@ class PyBulletSim:
     )
     FINGER_JOINTS = ("left_finger_joint", "right_finger_joint")
 
-    def __init__(self, gui: bool = False, urdf_path: str | Path = "robotic_arm.urdf"):
+    def __init__(self, gui: bool = False, urdf_path: Union[str, Path] = "robotic_arm.urdf"):
         self.client_id = p.connect(p.GUI if gui else p.DIRECT)
         if self.client_id < 0:
             raise RuntimeError("Could not connect to PyBullet")

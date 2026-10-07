@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 
 class Calibration:
-    def __init__(self, path: str | Path):
+    def __init__(self, path: Union[str, Path]):
         with Path(path).open("r", encoding="utf-8") as f:
             self.data = json.load(f)
         self.joints = self.data["joints"]
