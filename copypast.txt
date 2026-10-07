@@ -1,0 +1,13 @@
+On the Jetson, from inside the repo folder, run these in order:
+sudo apt update
+sudo apt install -y python3-pip python3-smbus i2c-tools
+pip3 install -r requirements.txt
+pip3 install -r requirements-jetson.txt
+Check PCA9685 is visible on I2C:
+i2cdetect -y -r 1
+You should see 40 in the table, usually address 0x40.
+Then run simulation + direct Jetson PCA9685 hardware:
+python3 main.py --jetson-pca9685 --no-gui
+If you want PyBullet GUI on Jetson, try:
+python3 main.py --jetson-pca9685
+But --no-gui is safer on Jetson.
