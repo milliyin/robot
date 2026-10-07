@@ -35,6 +35,14 @@ i2cdetect -y -r 1
 # Check Python hardware imports
 python3.8 -c "import Jetson.GPIO; import board; import busio; import adafruit_pca9685; print('PCA9685 libs OK')"
 
+# CSI / Raspberry camera quick tests
+python3.8 camera_preview.py --snapshot camera_test.jpg
+python3.8 camera_preview.py --no-window
+python3.8 camera_preview.py
+
+# If the camera image is upside down
+python3.8 camera_preview.py --flip 2
+
 # Run simulation only, no hardware
 python3.8 main.py --no-gui
 
