@@ -10,6 +10,16 @@ python3.8 -m pip --version
 sudo apt update
 sudo apt install -y i2c-tools python3-smbus
 
+# Fix Jetson GPIO/I2C permissions for the current user.
+# Reboot after this block, then continue below.
+sudo groupadd -f gpio
+sudo groupadd -f i2c
+sudo usermod -aG gpio,i2c $USER
+sudo reboot
+
+# After reboot, confirm your user is in gpio and i2c groups
+groups
+
 # Install Python dependencies with Python 3.8
 python3.8 -m pip install --upgrade pip==25.0.1
 python3.8 -m pip install -r requirements.txt
@@ -30,6 +40,10 @@ python3.8 main.py --no-gui
 
 # Run direct Jetson -> PCA9685 hardware mode
 python3.8 main.py --jetson-pca9685 --no-gui
+
+# Temporary fallback if GPIO/I2C permissions still fail.
+# Better long-term fix is group permissions plus reboot above.
+sudo -E python3.8 main.py --jetson-pca9685 --no-gui
 
 # If your PCA9685 is not at 0x40, replace the address
 python3.8 main.py --jetson-pca9685 --i2c-address 0x40 --no-gui
