@@ -1,15 +1,11 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, NamedTuple, Tuple
 
 
 Vector3 = Tuple[float, float, float]
 JointPoseDeg = Dict[str, float]
 
 
-@dataclass(frozen=True)
-class ToolPoseMeasurementCm:
+class ToolPoseMeasurementCm(NamedTuple):
     sim_xyz: Vector3
     real_xyz: Vector3
 
