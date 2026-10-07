@@ -1,4 +1,7 @@
 import argparse
+import os
+import select
+import sys
 import time
 
 from hardware.arduino_serial import ArduinoSerial
@@ -76,8 +79,6 @@ def create_hardware_backend(args):
 
 
 def run_keyboard_loop(controller: RobotController) -> None:
-    import msvcrt
-
     bindings = {
         "1": ("s1", STEP_DEG),
         "q": ("s1", -STEP_DEG),
@@ -91,34 +92,71 @@ def run_keyboard_loop(controller: RobotController) -> None:
         "t": ("s5", -STEP_DEG),
     }
 
-    while True:
-        if not msvcrt.kbhit():
-            time.sleep(0.02)
-            continue
+    with KeyboardReader() as keyboard:
+        while True:
+            char = keyboard.read_key()
+            if char is None:
+                time.sleep(0.02)
+                continue
 
-        key = msvcrt.getch()
-        if key == b"\x1b":
-            break
-        char = key.decode("ascii", errors="ignore").lower()
-        if char in bindings:
-            joint, delta = bindings[char]
-            controller.set_joint_deg(joint, controller.state_deg[joint] + delta)
-        elif char == "o":
-            controller.set_gripper_opening_m(controller.gripper_opening_m + GRIPPER_STEP_M)
-        elif char == "p":
-            controller.set_gripper_opening_m(controller.gripper_opening_m - GRIPPER_STEP_M)
-        elif char == "h":
-            move_to_named_pose(controller, "home")
-            controller.set_gripper_opening_m(controller.calibration.gripper["max_opening_m"])
-        elif char == "a":
-            move_to_named_pose(controller, "pose_a")
-        elif char == "b":
-            move_to_named_pose(controller, "pose_b")
-        elif char == "c":
-            move_to_named_pose(controller, "pose_c")
-        elif char == "x":
-            position, _ = controller.get_tool_pose()
-            print(f"tool0 xyz: {position[0]:.3f}, {position[1]:.3f}, {position[2]:.3f}")
+            if char == "\x1b":
+                break
+            char = char.lower()
+            if char in bindings:
+                joint, delta = bindings[char]
+                controller.set_joint_deg(joint, controller.state_deg[joint] + delta)
+            elif char == "o":
+                controller.set_gripper_opening_m(controller.gripper_opening_m + GRIPPER_STEP_M)
+            elif char == "p":
+                controller.set_gripper_opening_m(controller.gripper_opening_m - GRIPPER_STEP_M)
+            elif char == "h":
+                move_to_named_pose(controller, "home")
+                controller.set_gripper_opening_m(controller.calibration.gripper["max_opening_m"])
+            elif char == "a":
+                move_to_named_pose(controller, "pose_a")
+            elif char == "b":
+                move_to_named_pose(controller, "pose_b")
+            elif char == "c":
+                move_to_named_pose(controller, "pose_c")
+            elif char == "x":
+                position, _ = controller.get_tool_pose()
+                print(f"tool0 xyz: {position[0]:.3f}, {position[1]:.3f}, {position[2]:.3f}")
+
+
+class KeyboardReader:
+    def __init__(self):
+        self._is_windows = os.name == "nt"
+        self._old_settings = None
+
+    def __enter__(self):
+        if not self._is_windows and sys.stdin.isatty():
+            import termios
+            import tty
+
+            self._old_settings = termios.tcgetattr(sys.stdin)
+            tty.setcbreak(sys.stdin.fileno())
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._old_settings is not None:
+            import termios
+
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._old_settings)
+
+    def read_key(self):
+        if self._is_windows:
+            import msvcrt
+
+            if not msvcrt.kbhit():
+                return None
+            return msvcrt.getch().decode("ascii", errors="ignore")
+
+        if not sys.stdin.isatty():
+            return None
+        ready, _, _ = select.select([sys.stdin], [], [], 0)
+        if not ready:
+            return None
+        return sys.stdin.read(1)
 
 
 def move_to_named_pose(controller: RobotController, name: str) -> None:
