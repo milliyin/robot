@@ -9,7 +9,18 @@ def _root():
 def test_urdf_has_tool0_and_two_fingers():
     root = _root()
     links = {x.get("name") for x in root.findall("link")}
-    assert {"left_finger_link", "right_finger_link", "tool0"} <= links
+    assert {"mobile_base_link", "left_finger_link", "right_finger_link", "tool0"} <= links
+
+
+def test_mobile_base_mounts_arm_base_18_cm_above_ground():
+    root = _root()
+    joints = {j.get("name"): j for j in root.findall("joint")}
+    joint = joints["mobile_base_to_arm_base"]
+    assert joint.get("type") == "fixed"
+    assert joint.find("parent").get("link") == "mobile_base_link"
+    assert joint.find("child").get("link") == "base_link"
+    xyz = [float(x) for x in joint.find("origin").get("xyz").split()]
+    assert xyz == [0.0, 0.0, 0.18]
 
 
 def test_measured_joint_limits_are_present():

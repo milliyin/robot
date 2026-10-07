@@ -5,6 +5,7 @@ import pytest
 pytest.importorskip("pybullet")
 
 from robot.kinematics import JOINT_LIMITS_RAD, forward_kinematics_deg, forward_kinematics_rad
+from robot.world_frame import MOBILE_BASE_HEIGHT_M, arm_base_xyz_to_world_xyz
 from simulation.pybullet_sim import PyBulletSim
 
 
@@ -45,10 +46,16 @@ def test_zero_pose_gives_measured_urdf_tool_height():
     _assert_xyz_close(xyz, (0.0, 0.0, 0.382))
 
 
+def test_world_frame_adds_mobile_base_mount_height():
+    raw_xyz = forward_kinematics_deg(POSES_DEG["home"])
+
+    _assert_xyz_close(arm_base_xyz_to_world_xyz(raw_xyz), (0.0, 0.0, 0.382 + MOBILE_BASE_HEIGHT_M))
+
+
 @pytest.mark.parametrize("pose_name", ["home", "pose_a", "pose_b"])
 def test_forward_kinematics_matches_pybullet_for_known_poses(pose_name):
     pose = POSES_DEG[pose_name]
-    analytic_xyz = forward_kinematics_deg(pose)
+    analytic_xyz = arm_base_xyz_to_world_xyz(forward_kinematics_deg(pose))
     pybullet_xyz = _sim_tool_xyz(pose)
 
     _assert_xyz_close(analytic_xyz, pybullet_xyz, abs_tol=1e-4)
