@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Callable
+from typing import Callable, List, Optional
 
 
 SAFE_PWM_RANGES = (
@@ -17,18 +17,18 @@ SAFE_PWM_RANGES = (
 class ArduinoSerial:
     def __init__(
         self,
-        port: str | None = None,
+        port: Optional[str] = None,
         baud: int = 115200,
         max_hz: float = 30,
         serial_obj=None,
-        serial_factory: Callable | None = None,
+        serial_factory: Optional[Callable] = None,
     ):
         self.max_hz = float(max_hz)
         self.min_interval = 1.0 / self.max_hz if self.max_hz > 0 else 0.0
         self._last_send = 0.0
         self.serial = serial_obj
         self.connected = serial_obj is not None
-        self.error: Exception | None = None
+        self.error: Optional[Exception] = None
 
         if self.serial is None and port:
             try:
@@ -42,7 +42,7 @@ class ArduinoSerial:
                 self.error = exc
                 self.connected = False
 
-    def send_pwm(self, values: list[int]) -> bool:
+    def send_pwm(self, values: List[int]) -> bool:
         if not self.connected or self.serial is None:
             return False
         if len(values) != 6:

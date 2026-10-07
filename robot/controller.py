@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Dict
 
 from robot.calibration import Calibration
 
@@ -19,7 +20,7 @@ class RobotController:
         self.state_deg[key] = self.calibration.clamp_joint_deg(key, angle)
         self._emit()
 
-    def set_pose_deg(self, pose: dict[str, float]) -> None:
+    def set_pose_deg(self, pose: Dict[str, float]) -> None:
         for name, angle in pose.items():
             key = name.lower()
             self.state_deg[key] = self.calibration.clamp_joint_deg(key, angle)

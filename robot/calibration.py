@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 
 class Calibration:
@@ -11,13 +12,13 @@ class Calibration:
         self.joints = self.data["joints"]
         self.gripper = self.data["gripper"]
 
-    def joint_keys(self) -> list[str]:
+    def joint_keys(self) -> List[str]:
         return list(self.joints.keys())
 
     def urdf_joint_name(self, joint_name: str) -> str:
         return self._joint(joint_name)["joint_name"]
 
-    def joint_limits_deg(self, joint_name: str) -> tuple[float, float]:
+    def joint_limits_deg(self, joint_name: str) -> Tuple[float, float]:
         joint = self._joint(joint_name)
         return float(joint["min_deg"]), float(joint["max_deg"])
 
@@ -63,10 +64,10 @@ class Calibration:
         pwm = closed_pwm + (opening / max_opening) * (open_pwm - closed_pwm)
         return self._clamp_pwm(self.gripper, round(pwm))
 
-    def startup_pwm(self) -> list[int]:
+    def startup_pwm(self) -> List[int]:
         return [int(x) for x in self.data["startup_pwm"]]
 
-    def _joint(self, joint_name: str) -> dict:
+    def _joint(self, joint_name: str) -> Dict:
         try:
             return self.joints[joint_name.lower()]
         except KeyError as exc:

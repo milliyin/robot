@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import Dict, Tuple
 
 import pybullet as p
 
@@ -27,11 +28,11 @@ class PyBulletSim:
             useFixedBase=True,
             physicsClientId=self.client_id,
         )
-        self.joint_indices: dict[str, int] = {}
-        self.link_indices: dict[str, int] = {}
+        self.joint_indices: Dict[str, int] = {}
+        self.link_indices: Dict[str, int] = {}
         self._discover_names()
 
-    def set_joint_positions_rad(self, positions: dict[str, float]) -> None:
+    def set_joint_positions_rad(self, positions: Dict[str, float]) -> None:
         for name, value in positions.items():
             if name not in self.ARM_JOINTS:
                 raise KeyError(f"Unknown arm joint: {name}")
@@ -52,7 +53,7 @@ class PyBulletSim:
         )
         return float(state[0])
 
-    def get_tool_pose(self) -> tuple[tuple[float, float, float], tuple[float, float, float, float]]:
+    def get_tool_pose(self) -> Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]:
         link_state = p.getLinkState(
             self.robot_id,
             self.link_indices["tool0"],

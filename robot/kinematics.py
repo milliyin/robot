@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
+from typing import Tuple
 
 
 KINEMATICS_ENABLED = True
@@ -22,8 +23,8 @@ S3_TO_S4_M = 0.110
 S5_TO_TOOL0_M = 0.117
 
 
-Matrix4 = tuple[tuple[float, float, float, float], ...]
-Vector3 = tuple[float, float, float]
+Matrix4 = Tuple[Tuple[float, float, float, float], ...]
+Vector3 = Tuple[float, float, float]
 
 
 def forward_kinematics_deg(joints: Mapping[str, float]) -> Vector3:

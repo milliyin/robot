@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Callable
+from typing import Callable, List, Optional
 
 from hardware.arduino_serial import SAFE_PWM_RANGES
 
@@ -18,14 +18,14 @@ class JetsonPCA9685:
         frequency: int = 50,
         max_hz: float = 30,
         pca_obj=None,
-        pca_factory: Callable | None = None,
+        pca_factory: Optional[Callable] = None,
     ):
         self.max_hz = float(max_hz)
         self.min_interval = 1.0 / self.max_hz if self.max_hz > 0 else 0.0
         self._last_send = 0.0
         self.pca = pca_obj
         self.connected = pca_obj is not None
-        self.error: Exception | None = None
+        self.error: Optional[Exception] = None
 
         if self.pca is None:
             try:
@@ -47,7 +47,7 @@ class JetsonPCA9685:
         if self.connected and self.pca is not None:
             self.pca.frequency = frequency
 
-    def send_pwm(self, values: list[int]) -> bool:
+    def send_pwm(self, values: List[int]) -> bool:
         if not self.connected or self.pca is None:
             return False
         if len(values) != 6:
