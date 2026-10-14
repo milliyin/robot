@@ -36,6 +36,7 @@ def gstreamer_pipeline(
 
 class ThreadedCamera:
     def __init__(self, pipeline):
+        self.pipeline = pipeline
         self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
         self.frame = None
         self.ok = False
@@ -45,7 +46,19 @@ class ThreadedCamera:
 
     def start(self):
         if not self.cap.isOpened():
-            raise RuntimeError("Could not open CSI camera. Check ribbon cable, camera enablement, and nvargus-daemon.")
+            raise RuntimeError(
+                "Could not open CSI camera.\n\n"
+                "Pipeline:\n%s\n\n"
+                "Try these on the Jetson:\n"
+                "  sudo systemctl restart nvargus-daemon\n"
+                "  gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! "
+                "'video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1' ! "
+                "nvvidconv ! 'video/x-raw,format=BGRx' ! videoconvert ! "
+                "fakesink\n\n"
+                "Also try this script with lower settings:\n"
+                "  python3 camera_preview.py --width 640 --height 480 --display-width 640 --display-height 480 --fps 15\n"
+                % self.pipeline
+            )
         self.running = True
         self.thread = threading.Thread(target=self._loop)
         self.thread.daemon = True
@@ -98,6 +111,7 @@ def main():
         flip_method=args.flip,
     )
     print("Opening CSI camera...")
+    print("Pipeline:", pipeline)
     camera = ThreadedCamera(pipeline)
     camera.start()
 

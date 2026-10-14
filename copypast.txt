@@ -117,10 +117,26 @@ If that shows HTML, the app is running.
 Now check Jetson IP:
 hostname -I
 Use the IP shown there from your PC browser:
-http://192.168.137.75:8787
+http://192.168.137ip  75:8787
 If local Jetson test works but PC still says site cannot be reached, test from PC Command Prompt:
 ping 192.168.137.75
 If ping fails, PC and Jetson are not talking on the network. If ping works but browser fails, the port is blocked or the app is not listening on 0.0.0.0.
 Also check on Jetson:
 ss -ltn | grep 8787
 You want to see 0.0.0.0:8787, not only 127.0.0.1:8787.
+
+
+That error means the CSI camera is not opening at the GStreamer/Jetson level yet.
+I updated camera_preview.py so next time it prints the full camera pipeline plus the exact test command.
+Run this first on Jetson:
+sudo systemctl restart nvargus-daemon
+python3 camera_preview.py
+If it still fails, try lower settings:
+python3 camera_preview.py --width 640 --height 480 --display-width 640 --display-height 480 --fps 15
+Then test the camera outside Python:
+gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! 'video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1' ! nvvidconv ! 'video/x-raw,format=BGRx' ! videoconvert ! fakesink
+If that gst-launch command also fails, the problem is not our Python script. Check these next:
+ls /dev/video*
+systemctl status nvargus-daemon
+Most common physical fix: power off Jetson fully, reseat the ribbon cable, make sure the shiny contacts face the correct direction for the Jetson CSI connector, then boot again.
+Also important: you pasted a GitHub token in copypast.txt. Revoke/regenerate it when you can.
