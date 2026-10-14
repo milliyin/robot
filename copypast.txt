@@ -43,6 +43,29 @@ python3.8 camera_preview.py
 # If the camera image is upside down
 python3.8 camera_preview.py --flip 2
 
+# CSI camera deeper debug if Python says "Could not open CSI camera"
+sudo systemctl restart nvargus-daemon
+
+# Test CSI camera without Python. This may not show a window; it only checks capture startup.
+gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! 'video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1' ! nvvidconv ! 'video/x-raw,format=BGRx' ! videoconvert ! fakesink
+
+# Visual preview test on Jetson desktop/monitor
+gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! 'video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1' ! nvvidconv ! 'video/x-raw,format=I420' ! xvimagesink
+
+# Snapshot test when using SSH or no preview window
+gst-launch-1.0 -e nvarguscamerasrc sensor-id=0 num-buffers=1 ! 'video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1' ! nvjpegenc ! filesink location=test_camera.jpg
+ls -lh test_camera.jpg
+
+# Try Python snapshot with smaller display output
+python3 camera_preview.py --width 1280 --height 720 --display-width 640 --display-height 360 --fps 30 --snapshot test_py.jpg
+
+# Check whether your OpenCV has GStreamer support. It must say GStreamer: YES.
+python3 -c "import cv2; print(cv2.getBuildInformation())" | grep -i gstreamer
+
+# If GStreamer is NO for pip OpenCV, use Jetson system OpenCV
+sudo apt install -y python3-opencv
+python3 camera_preview.py --snapshot test_py.jpg
+
 # Run simulation only, no hardware
 python3.8 main.py --no-gui
 
