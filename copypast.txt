@@ -104,3 +104,23 @@ sudo ufw allow 8787/tcp
 
 
 
+Most likely the app is not running on the Jetson, or 192.168.137.75 is not the Jetson’s active IP.
+On the Jetson, run this and keep that terminal open:
+cd ~/robot
+python3.8 copy_paste_app.py --host 0.0.0.0 --port 8787
+You should see something like:
+Clipboard bridge running on http://0.0.0.0:8787
+On your PC, open http://JETSON_IP:8787
+Then open a second Jetson terminal and test locally:
+wget -qO- http://127.0.0.1:8787 | head
+If that shows HTML, the app is running.
+Now check Jetson IP:
+hostname -I
+Use the IP shown there from your PC browser:
+http://192.168.137.75:8787
+If local Jetson test works but PC still says site cannot be reached, test from PC Command Prompt:
+ping 192.168.137.75
+If ping fails, PC and Jetson are not talking on the network. If ping works but browser fails, the port is blocked or the app is not listening on 0.0.0.0.
+Also check on Jetson:
+ss -ltn | grep 8787
+You want to see 0.0.0.0:8787, not only 127.0.0.1:8787.
