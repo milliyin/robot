@@ -79,3 +79,28 @@ python3 -c "import cv2; print(cv2.__version__)"
 If python3 works but python3.8 does not, easiest run camera with:
 python3 camera_preview.py --snapshot camera_test.jpg
 I can also add OpenCV to requirements-jetson.txt if you want.
+
+
+# Two-way PC <-> Jetson copy/paste website
+
+cd ~/robot
+
+# Start the clipboard bridge on the Jetson
+python3.8 copy_paste_app.py --host 0.0.0.0 --port 8787
+
+# In another Jetson terminal, find the Jetson IP address
+hostname -I
+
+# On the PC browser, open this, replacing JETSON_IP with the address from hostname -I
+http://JETSON_IP:8787
+
+# Optional if firewall is enabled and the PC cannot open the page
+sudo ufw allow 8787/tcp
+
+# How to use:
+# PC -> Jetson: type/paste text in PC -> Jetson, press Save on PC, open the same website on Jetson, press Copy there.
+# Jetson -> PC: type/paste text in Jetson -> PC, press Save on Jetson, open the same website on PC, press Copy there.
+# Browser security requires pressing Copy before pasting into another app.
+
+
+
