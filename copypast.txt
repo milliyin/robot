@@ -1,165 +1,317 @@
-# Jetson Nano setup and run commands
+import cv2
+import mediapipe as mp
+import numpy as np
+import gi
+import threading
+import time
+import sys
 
-cd ~/robot
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
 
-# Check Python 3.8 and pip
-python3.8 --version
-python3.8 -m pip --version
+Gst.init(None)
 
-# System packages for I2C tools
-sudo apt update
-sudo apt install -y i2c-tools python3-smbus
+CAPTURE_WIDTH = 1280
+CAPTURE_HEIGHT = 720
+DISPLAY_WIDTH = 640
+DISPLAY_HEIGHT = 480
+CAMERA_FPS = 30
+SENSOR_ID = 0
 
-# Fix Jetson GPIO/I2C permissions for the current user.
-# Reboot after this block, then continue below.
-sudo groupadd -f gpio
-sudo groupadd -f i2c
-sudo usermod -aG gpio,i2c $USER
-sudo reboot
-
-# After reboot, confirm your user is in gpio and i2c groups
-groups
-
-# Install Python dependencies with Python 3.8
-python3.8 -m pip install --upgrade pip==25.0.1
-python3.8 -m pip install -r requirements.txt
-python3.8 -m pip install -r requirements-jetson.txt
-
-# If Jetson.GPIO still fails, run this directly
-python3.8 -m pip install Jetson.GPIO adafruit-blinka adafruit-circuitpython-pca9685
-
-# Check PCA9685 appears on I2C bus.
-# You should see 40 in the table.
-i2cdetect -y -r 1
-
-# Check Python hardware imports
-python3.8 -c "import Jetson.GPIO; import board; import busio; import adafruit_pca9685; print('PCA9685 libs OK')"
-
-# CSI / Raspberry camera quick tests
-python3.8 camera_preview.py --snapshot camera_test.jpg
-python3.8 camera_preview.py --no-window
-python3.8 camera_preview.py
-
-# If the camera image is upside down
-python3.8 camera_preview.py --flip 2
-
-# CSI camera deeper debug if Python says "Could not open CSI camera"
-sudo systemctl restart nvargus-daemon
-
-# Test CSI camera without Python. This may not show a window; it only checks capture startup.
-gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! 'video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1' ! nvvidconv ! 'video/x-raw,format=BGRx' ! videoconvert ! fakesink
-
-# Visual preview test on Jetson desktop/monitor
-gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! 'video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1' ! nvvidconv ! 'video/x-raw,format=I420' ! xvimagesink
-
-# Snapshot test when using SSH or no preview window
-gst-launch-1.0 -e nvarguscamerasrc sensor-id=0 num-buffers=1 ! 'video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1' ! nvjpegenc ! filesink location=test_camera.jpg
-ls -lh test_camera.jpg
-
-# Try Python snapshot with smaller display output
-python3 camera_preview.py --width 1280 --height 720 --display-width 640 --display-height 360 --fps 30 --snapshot test_py.jpg
-
-# Check whether your OpenCV has GStreamer support. It must say GStreamer: YES.
-python3 -c "import cv2; print(cv2.getBuildInformation())" | grep -i gstreamer
-
-# If GStreamer is NO for pip OpenCV, use Jetson system OpenCV
-sudo apt install -y python3-opencv
-python3 camera_preview.py --snapshot test_py.jpg
-
-# Run simulation only, no hardware
-python3.8 main.py --no-gui
-
-# Run direct Jetson -> PCA9685 hardware mode
-python3.8 main.py --jetson-pca9685 --no-gui
-
-# Temporary fallback if GPIO/I2C permissions still fail.
-# Better long-term fix is group permissions plus reboot above.
-sudo -E python3.8 main.py --jetson-pca9685 --no-gui
-
-# If your PCA9685 is not at 0x40, replace the address
-python3.8 main.py --jetson-pca9685 --i2c-address 0x40 --no-gui
-
-# Useful controls after launch:
-# h = Home
-# a = Pose A
-# b = Pose B
-# c = Pose C
-# 1/q, 2/w, 3/e, 4/r, 5/t = manual joints
-# o/p = gripper
-# x = print tool0 xyz
-# Esc = quit
+MP_WIDTH = 320
+MP_HEIGHT = 240
+MP_INTERVAL = 0.08       # about 12.5 MediaPipe updates/second maximum
 
 
-On Jetson, run:
-python3.8 -m pip install opencv-python
-If that is slow/fails on Jetson, use apt instead:
-sudo apt update
-sudo apt install -y python3-opencv
-Then test:
-python3.8 -c "import cv2; print(cv2.__version__)"
-Important: if sudo apt install python3-opencv installs it only for default python3, test:
-python3 -c "import cv2; print(cv2.__version__)"
-If python3 works but python3.8 does not, easiest run camera with:
-python3 camera_preview.py --snapshot camera_test.jpg
-I can also add OpenCV to requirements-jetson.txt if you want.
+class NativeGstCapture:
+    def __init__(self, sensor_id=0):
+        self.pipeline_str = (
+            "nvarguscamerasrc sensor-id=%d ! "
+            "video/x-raw(memory:NVMM), "
+            "width=(int)%d, height=(int)%d, "
+            "format=(string)NV12, framerate=(fraction)%d/1 ! "
+            "nvvidconv flip-method=0 ! "
+            "video/x-raw, width=(int)%d, height=(int)%d, "
+            "format=(string)BGRx ! "
+            "videoconvert ! "
+            "video/x-raw, format=(string)BGR ! "
+            "appsink name=sink max-buffers=1 drop=true sync=false"
+            % (
+                sensor_id,
+                CAPTURE_WIDTH,
+                CAPTURE_HEIGHT,
+                CAMERA_FPS,
+                DISPLAY_WIDTH,
+                DISPLAY_HEIGHT,
+            )
+        )
+
+        self.pipeline = Gst.parse_launch(self.pipeline_str)
+        self.appsink = self.pipeline.get_by_name("sink")
+
+        if self.appsink is None:
+            raise RuntimeError("Could not obtain GStreamer appsink.")
+
+        result = self.pipeline.set_state(Gst.State.PLAYING)
+        if result == Gst.StateChangeReturn.FAILURE:
+            self.pipeline.set_state(Gst.State.NULL)
+            raise RuntimeError("GStreamer failed to start the CSI camera.")
+
+    def read(self):
+        sample = self.appsink.emit("pull-sample")
+        if sample is None:
+            return False, None
+
+        buf = sample.get_buffer()
+        caps = sample.get_caps()
+        structure = caps.get_structure(0)
+
+        width = structure.get_value("width")
+        height = structure.get_value("height")
+
+        success, map_info = buf.map(Gst.MapFlags.READ)
+        if not success:
+            return False, None
+
+        try:
+            frame = np.ndarray(
+                (height, width, 3),
+                buffer=map_info.data,
+                dtype=np.uint8,
+            ).copy()
+        finally:
+            buf.unmap(map_info)
+
+        return True, frame
+
+    def release(self):
+        if self.pipeline is not None:
+            self.pipeline.set_state(Gst.State.NULL)
 
 
-# Two-way PC <-> Jetson copy/paste website
+mp_hands = mp.solutions.hands
 
-cd ~/robot
+FINGER_TIPS = {
+    4: "Thumb",
+    8: "Index",
+    12: "Middle",
+    16: "Ring",
+    20: "Pinky",
+}
 
-# Start the clipboard bridge on the Jetson
-python3.8 copy_paste_app.py --host 0.0.0.0 --port 8787
-
-# In another Jetson terminal, find the Jetson IP address
-hostname -I
-
-# On the PC browser, open this, replacing JETSON_IP with the address from hostname -I
-http://JETSON_IP:8787
-
-# Optional if firewall is enabled and the PC cannot open the page
-sudo ufw allow 8787/tcp
-
-# How to use:
-# PC -> Jetson: type/paste text in PC -> Jetson, press Save on PC, open the same website on Jetson, press Copy there.
-# Jetson -> PC: type/paste text in Jetson -> PC, press Save on Jetson, open the same website on PC, press Copy there.
-# Browser security requires pressing Copy before pasting into another app.
+running = True
+frame_for_mp = None
+latest_landmarks = None
+mediapipe_fps = 0.0
+shared_lock = threading.Lock()
 
 
+def mediapipe_worker():
+    global running, frame_for_mp, latest_landmarks, mediapipe_fps
 
-Most likely the app is not running on the Jetson, or 192.168.137.75 is not the Jetson’s active IP.
-On the Jetson, run this and keep that terminal open:
-cd ~/robot
-python3.8 copy_paste_app.py --host 0.0.0.0 --port 8787
-You should see something like:
-Clipboard bridge running on http://0.0.0.0:8787
-On your PC, open http://JETSON_IP:8787
-Then open a second Jetson terminal and test locally:
-wget -qO- http://127.0.0.1:8787 | head
-If that shows HTML, the app is running.
-Now check Jetson IP:
-hostname -I
-Use the IP shown there from your PC browser:
-http://192.168.137ip  75:8787
-If local Jetson test works but PC still says site cannot be reached, test from PC Command Prompt:
-ping 192.168.137.75
-If ping fails, PC and Jetson are not talking on the network. If ping works but browser fails, the port is blocked or the app is not listening on 0.0.0.0.
-Also check on Jetson:
-ss -ltn | grep 8787
-You want to see 0.0.0.0:8787, not only 127.0.0.1:8787.
+    hands = mp_hands.Hands(
+        static_image_mode=False,
+        max_num_hands=2,
+        min_detection_confidence=0.6,
+        min_tracking_confidence=0.5,
+    )
+
+    last_process_time = 0.0
+    previous_done_time = None
+
+    try:
+        while running:
+            now = time.time()
+
+            if now - last_process_time < MP_INTERVAL:
+                time.sleep(0.002)
+                continue
+
+            local_frame = None
+            with shared_lock:
+                if frame_for_mp is not None:
+                    local_frame = frame_for_mp
+                    frame_for_mp = None
+
+            if local_frame is None:
+                time.sleep(0.003)
+                continue
+
+            last_process_time = time.time()
+
+            rgb = cv2.cvtColor(local_frame, cv2.COLOR_BGR2RGB)
+            rgb.flags.writeable = False
+            results = hands.process(rgb)
+            rgb.flags.writeable = True
+
+            all_hands = []
+
+            if results.multi_hand_landmarks:
+                for hand in results.multi_hand_landmarks:
+                    points = np.array(
+                        [[lm.x, lm.y, lm.z] for lm in hand.landmark],
+                        dtype=np.float32,
+                    )
+                    all_hands.append(points)
+
+            done_time = time.time()
+            if previous_done_time is not None:
+                dt = done_time - previous_done_time
+                if dt > 0:
+                    current_fps = 1.0 / dt
+                    if mediapipe_fps == 0.0:
+                        mediapipe_fps = current_fps
+                    else:
+                        mediapipe_fps = 0.85 * mediapipe_fps + 0.15 * current_fps
+            previous_done_time = done_time
+
+            with shared_lock:
+                latest_landmarks = all_hands
+
+    finally:
+        hands.close()
 
 
-That error means the CSI camera is not opening at the GStreamer/Jetson level yet.
-I updated camera_preview.py so next time it prints the full camera pipeline plus the exact test command.
-Run this first on Jetson:
-sudo systemctl restart nvargus-daemon
-python3 camera_preview.py
-If it still fails, try lower settings:
-python3 camera_preview.py --width 640 --height 480 --display-width 640 --display-height 480 --fps 15
-Then test the camera outside Python:
-gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! 'video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1' ! nvvidconv ! 'video/x-raw,format=BGRx' ! videoconvert ! fakesink
-If that gst-launch command also fails, the problem is not our Python script. Check these next:
-ls /dev/video*
-systemctl status nvargus-daemon
-Most common physical fix: power off Jetson fully, reseat the ribbon cable, make sure the shiny contacts face the correct direction for the Jetson CSI connector, then boot again.
-Also important: you pasted a GitHub token in copypast.txt. Revoke/regenerate it when you can.
+def draw_hand(frame, points):
+    height, width = frame.shape[:2]
+
+    for connection in mp_hands.HAND_CONNECTIONS:
+        start_idx, end_idx = connection
+
+        p1 = (
+            int(points[start_idx, 0] * width),
+            int(points[start_idx, 1] * height),
+        )
+        p2 = (
+            int(points[end_idx, 0] * width),
+            int(points[end_idx, 1] * height),
+        )
+
+        cv2.line(frame, p1, p2, (0, 255, 0), 2)
+
+    for index, point in enumerate(points):
+        x = int(point[0] * width)
+        y = int(point[1] * height)
+
+        cv2.circle(frame, (x, y), 4, (0, 0, 255), -1)
+
+        if index in FINGER_TIPS:
+            cv2.putText(
+                frame,
+                FINGER_TIPS[index],
+                (x + 8, y - 7),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (255, 0, 0),
+                1,
+            )
+
+
+def main():
+    global running, frame_for_mp
+
+    cap = None
+    worker = None
+
+    try:
+        print("Starting MediaPipe worker...")
+        worker = threading.Thread(target=mediapipe_worker)
+        worker.daemon = True
+        worker.start()
+
+        print("Opening CSI camera with native GStreamer...")
+        cap = NativeGstCapture(SENSOR_ID)
+
+        print("Hand tracking running. Press ESC or Q to stop.")
+
+        previous_frame_time = time.time()
+        camera_fps = 0.0
+
+        while running:
+            success, frame = cap.read()
+
+            if not success or frame is None:
+                time.sleep(0.001)
+                continue
+
+            now = time.time()
+            dt = now - previous_frame_time
+            previous_frame_time = now
+
+            if dt > 0:
+                instant_fps = 1.0 / dt
+                if camera_fps == 0.0:
+                    camera_fps = instant_fps
+                else:
+                    camera_fps = 0.90 * camera_fps + 0.10 * instant_fps
+
+            with shared_lock:
+                if frame_for_mp is None:
+                    frame_for_mp = cv2.resize(
+                        frame,
+                        (MP_WIDTH, MP_HEIGHT),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
+
+                if latest_landmarks is None:
+                    hands_to_draw = []
+                else:
+                    hands_to_draw = [points.copy() for points in latest_landmarks]
+
+                mp_fps_local = mediapipe_fps
+
+            for points in hands_to_draw:
+                draw_hand(frame, points)
+
+            cv2.putText(
+                frame,
+                "CAM FPS: %.1f | MP FPS: %.1f" % (camera_fps, mp_fps_local),
+                (15, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (0, 255, 0),
+                2,
+            )
+
+            cv2.putText(
+                frame,
+                "Hands: %d" % len(hands_to_draw),
+                (15, 58),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 255, 255),
+                1,
+            )
+
+            cv2.imshow("Jetson Nano Hand Tracking", frame)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == 27 or key == ord("q"):
+                running = False
+                break
+
+    except KeyboardInterrupt:
+        running = False
+    except Exception as exc:
+        running = False
+        print("ERROR:", exc)
+        print("If another camera program is running, stop it and run:")
+        print("sudo systemctl restart nvargus-daemon")
+        return 1
+    finally:
+        running = False
+
+        if worker is not None:
+            worker.join(timeout=2.0)
+
+        if cap is not None:
+            cap.release()
+
+        cv2.destroyAllWindows()
+
+    print("Hand-tracking resources released.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

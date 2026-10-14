@@ -1,156 +1,317 @@
-import argparse
+import cv2
+import mediapipe as mp
+import numpy as np
+import gi
 import threading
 import time
+import sys
 
-import cv2
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
 
+Gst.init(None)
 
-def gstreamer_pipeline(
-    sensor_id=0,
-    capture_width=1280,
-    capture_height=720,
-    display_width=960,
-    display_height=540,
-    framerate=30,
-    flip_method=0,
-):
-    return (
-        "nvarguscamerasrc sensor-id=%d ! "
-        "video/x-raw(memory:NVMM), width=(int)%d, height=(int)%d, "
-        "format=(string)NV12, framerate=(fraction)%d/1 ! "
-        "nvvidconv flip-method=%d ! "
-        "video/x-raw, width=(int)%d, height=(int)%d, format=(string)BGRx ! "
-        "videoconvert ! "
-        "video/x-raw, format=(string)BGR ! appsink drop=true max-buffers=1 sync=false"
-        % (
-            sensor_id,
-            capture_width,
-            capture_height,
-            framerate,
-            flip_method,
-            display_width,
-            display_height,
-        )
-    )
+CAPTURE_WIDTH = 1280
+CAPTURE_HEIGHT = 720
+DISPLAY_WIDTH = 640
+DISPLAY_HEIGHT = 480
+CAMERA_FPS = 30
+SENSOR_ID = 0
+
+MP_WIDTH = 320
+MP_HEIGHT = 240
+MP_INTERVAL = 0.08
 
 
-class ThreadedCamera:
-    def __init__(self, pipeline):
-        self.pipeline = pipeline
-        self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-        self.frame = None
-        self.ok = False
-        self.running = False
-        self.lock = threading.Lock()
-        self.thread = None
-
-    def start(self):
-        if not self.cap.isOpened():
-            raise RuntimeError(
-                "Could not open CSI camera.\n\n"
-                "Pipeline:\n%s\n\n"
-                "Try these on the Jetson:\n"
-                "  sudo systemctl restart nvargus-daemon\n"
-                "  gst-launch-1.0 nvarguscamerasrc sensor-id=0 ! "
-                "'video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1' ! "
-                "nvvidconv ! 'video/x-raw,format=BGRx' ! videoconvert ! "
-                "fakesink\n\n"
-                "Also try this script with lower settings:\n"
-                "  python3 camera_preview.py --width 640 --height 480 --display-width 640 --display-height 480 --fps 15\n"
-                % self.pipeline
+class NativeGstCapture:
+    def __init__(self, sensor_id=0):
+        self.pipeline_str = (
+            "nvarguscamerasrc sensor-id=%d ! "
+            "video/x-raw(memory:NVMM), "
+            "width=(int)%d, height=(int)%d, "
+            "format=(string)NV12, framerate=(fraction)%d/1 ! "
+            "nvvidconv flip-method=2 ! "
+            "video/x-raw, width=(int)%d, height=(int)%d, "
+            "format=(string)BGRx ! "
+            "videoconvert ! "
+            "video/x-raw, format=(string)BGR ! "
+            "appsink name=sink max-buffers=1 drop=true sync=false"
+            % (
+                sensor_id,
+                CAPTURE_WIDTH,
+                CAPTURE_HEIGHT,
+                CAMERA_FPS,
+                DISPLAY_WIDTH,
+                DISPLAY_HEIGHT,
             )
-        self.running = True
-        self.thread = threading.Thread(target=self._loop)
-        self.thread.daemon = True
-        self.thread.start()
+        )
 
-    def _loop(self):
-        while self.running:
-            ok, frame = self.cap.read()
-            with self.lock:
-                self.ok = ok
-                if ok:
-                    self.frame = frame
+        self.pipeline = Gst.parse_launch(self.pipeline_str)
+        self.appsink = self.pipeline.get_by_name("sink")
+
+        if self.appsink is None:
+            raise RuntimeError("Could not obtain GStreamer appsink.")
+
+        result = self.pipeline.set_state(Gst.State.PLAYING)
+        if result == Gst.StateChangeReturn.FAILURE:
+            self.pipeline.set_state(Gst.State.NULL)
+            raise RuntimeError("GStreamer failed to start the CSI camera.")
 
     def read(self):
-        with self.lock:
-            if self.frame is None:
-                return False, None
-            return self.ok, self.frame.copy()
+        sample = self.appsink.emit("pull-sample")
+        if sample is None:
+            return False, None
 
-    def stop(self):
-        self.running = False
-        if self.thread is not None:
-            self.thread.join(timeout=1.0)
-        self.cap.release()
+        buf = sample.get_buffer()
+        caps = sample.get_caps()
+        structure = caps.get_structure(0)
+
+        width = structure.get_value("width")
+        height = structure.get_value("height")
+
+        success, map_info = buf.map(Gst.MapFlags.READ)
+        if not success:
+            return False, None
+
+        try:
+            frame = np.ndarray(
+                (height, width, 3),
+                buffer=map_info.data,
+                dtype=np.uint8,
+            ).copy()
+        finally:
+            buf.unmap(map_info)
+
+        return True, frame
+
+    def release(self):
+        if self.pipeline is not None:
+            self.pipeline.set_state(Gst.State.NULL)
 
 
-def build_parser():
-    parser = argparse.ArgumentParser(description="Threaded Jetson CSI/Raspberry camera preview")
-    parser.add_argument("--sensor-id", type=int, default=0)
-    parser.add_argument("--width", type=int, default=1280)
-    parser.add_argument("--height", type=int, default=720)
-    parser.add_argument("--display-width", type=int, default=960)
-    parser.add_argument("--display-height", type=int, default=540)
-    parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument("--flip", type=int, default=0, help="0 none, 2 rotate 180, other nvvidconv flip-method values allowed")
-    parser.add_argument("--snapshot", default=None, help="Save one frame to this path and exit")
-    parser.add_argument("--no-window", action="store_true", help="Run without preview window; useful over SSH")
-    return parser
+mp_hands = mp.solutions.hands
+
+FINGER_TIPS = {
+    4: "Thumb",
+    8: "Index",
+    12: "Middle",
+    16: "Ring",
+    20: "Pinky",
+}
+
+running = True
+frame_for_mp = None
+latest_landmarks = None
+mediapipe_fps = 0.0
+shared_lock = threading.Lock()
+
+
+def mediapipe_worker():
+    global running, frame_for_mp, latest_landmarks, mediapipe_fps
+
+    hands = mp_hands.Hands(
+        static_image_mode=False,
+        max_num_hands=2,
+        min_detection_confidence=0.6,
+        min_tracking_confidence=0.5,
+    )
+
+    last_process_time = 0.0
+    previous_done_time = None
+
+    try:
+        while running:
+            now = time.time()
+
+            if now - last_process_time < MP_INTERVAL:
+                time.sleep(0.002)
+                continue
+
+            local_frame = None
+            with shared_lock:
+                if frame_for_mp is not None:
+                    local_frame = frame_for_mp
+                    frame_for_mp = None
+
+            if local_frame is None:
+                time.sleep(0.003)
+                continue
+
+            last_process_time = time.time()
+
+            rgb = cv2.cvtColor(local_frame, cv2.COLOR_BGR2RGB)
+            rgb.flags.writeable = False
+            results = hands.process(rgb)
+            rgb.flags.writeable = True
+
+            all_hands = []
+
+            if results.multi_hand_landmarks:
+                for hand in results.multi_hand_landmarks:
+                    points = np.array(
+                        [[lm.x, lm.y, lm.z] for lm in hand.landmark],
+                        dtype=np.float32,
+                    )
+                    all_hands.append(points)
+
+            done_time = time.time()
+            if previous_done_time is not None:
+                dt = done_time - previous_done_time
+                if dt > 0:
+                    current_fps = 1.0 / dt
+                    if mediapipe_fps == 0.0:
+                        mediapipe_fps = current_fps
+                    else:
+                        mediapipe_fps = 0.85 * mediapipe_fps + 0.15 * current_fps
+            previous_done_time = done_time
+
+            with shared_lock:
+                latest_landmarks = all_hands
+
+    finally:
+        hands.close()
+
+
+def draw_hand(frame, points):
+    height, width = frame.shape[:2]
+
+    for connection in mp_hands.HAND_CONNECTIONS:
+        start_idx, end_idx = connection
+
+        p1 = (
+            int(points[start_idx, 0] * width),
+            int(points[start_idx, 1] * height),
+        )
+        p2 = (
+            int(points[end_idx, 0] * width),
+            int(points[end_idx, 1] * height),
+        )
+
+        cv2.line(frame, p1, p2, (0, 255, 0), 2)
+
+    for index, point in enumerate(points):
+        x = int(point[0] * width)
+        y = int(point[1] * height)
+
+        cv2.circle(frame, (x, y), 4, (0, 0, 255), -1)
+
+        if index in FINGER_TIPS:
+            cv2.putText(
+                frame,
+                FINGER_TIPS[index],
+                (x + 8, y - 7),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (255, 0, 0),
+                1,
+            )
 
 
 def main():
-    args = build_parser().parse_args()
-    pipeline = gstreamer_pipeline(
-        sensor_id=args.sensor_id,
-        capture_width=args.width,
-        capture_height=args.height,
-        display_width=args.display_width,
-        display_height=args.display_height,
-        framerate=args.fps,
-        flip_method=args.flip,
-    )
-    print("Opening CSI camera...")
-    print("Pipeline:", pipeline)
-    camera = ThreadedCamera(pipeline)
-    camera.start()
+    global running, frame_for_mp
+
+    cap = None
+    worker = None
 
     try:
-        # Let the sensor warm up and the capture thread receive its first frames.
-        time.sleep(0.5)
-        if args.snapshot:
-            ok, frame = camera.read()
-            if not ok:
-                raise RuntimeError("Camera opened, but no frame was received.")
-            cv2.imwrite(args.snapshot, frame)
-            print("Saved snapshot:", args.snapshot)
-            return
+        print("Starting MediaPipe worker...")
+        worker = threading.Thread(target=mediapipe_worker)
+        worker.daemon = True
+        worker.start()
 
-        if args.no_window:
-            print("Camera is running. Press Ctrl+C to stop.")
-            while True:
-                ok, _ = camera.read()
-                if ok:
-                    print("frame ok")
-                    time.sleep(1.0)
-                else:
-                    print("waiting for frame")
-                    time.sleep(0.2)
+        print("Opening CSI camera with native GStreamer...")
+        cap = NativeGstCapture(SENSOR_ID)
 
-        print("Preview running. Press Esc or q to quit.")
-        while True:
-            ok, frame = camera.read()
-            if not ok:
-                time.sleep(0.01)
+        print("Hand tracking running. Press ESC or Q to stop.")
+
+        previous_frame_time = time.time()
+        camera_fps = 0.0
+
+        while running:
+            success, frame = cap.read()
+
+            if not success or frame is None:
+                time.sleep(0.001)
                 continue
-            cv2.imshow("CSI camera", frame)
+
+            now = time.time()
+            dt = now - previous_frame_time
+            previous_frame_time = now
+
+            if dt > 0:
+                instant_fps = 1.0 / dt
+                if camera_fps == 0.0:
+                    camera_fps = instant_fps
+                else:
+                    camera_fps = 0.90 * camera_fps + 0.10 * instant_fps
+
+            with shared_lock:
+                if frame_for_mp is None:
+                    frame_for_mp = cv2.resize(
+                        frame,
+                        (MP_WIDTH, MP_HEIGHT),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
+
+                if latest_landmarks is None:
+                    hands_to_draw = []
+                else:
+                    hands_to_draw = [points.copy() for points in latest_landmarks]
+
+                mp_fps_local = mediapipe_fps
+
+            for points in hands_to_draw:
+                draw_hand(frame, points)
+
+            cv2.putText(
+                frame,
+                "CAM FPS: %.1f | MP FPS: %.1f" % (camera_fps, mp_fps_local),
+                (15, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (0, 255, 0),
+                2,
+            )
+
+            cv2.putText(
+                frame,
+                "Hands: %d" % len(hands_to_draw),
+                (15, 58),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 255, 255),
+                1,
+            )
+
+            cv2.imshow("Jetson Nano Hand Tracking", frame)
+
             key = cv2.waitKey(1) & 0xFF
-            if key in (27, ord("q")):
+            if key == 27 or key == ord("q"):
+                running = False
                 break
+
+    except KeyboardInterrupt:
+        running = False
+    except Exception as exc:
+        running = False
+        print("ERROR:", exc)
+        print("If another camera program is running, stop it and run:")
+        print("sudo systemctl restart nvargus-daemon")
+        return 1
     finally:
-        camera.stop()
+        running = False
+
+        if worker is not None:
+            worker.join(timeout=2.0)
+
+        if cap is not None:
+            cap.release()
+
         cv2.destroyAllWindows()
+
+    print("Hand-tracking resources released.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
