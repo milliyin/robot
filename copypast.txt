@@ -65,3 +65,17 @@ python3.8 main.py --jetson-pca9685 --i2c-address 0x40 --no-gui
 # o/p = gripper
 # x = print tool0 xyz
 # Esc = quit
+
+
+On Jetson, run:
+python3.8 -m pip install opencv-python
+If that is slow/fails on Jetson, use apt instead:
+sudo apt update
+sudo apt install -y python3-opencv
+Then test:
+python3.8 -c "import cv2; print(cv2.__version__)"
+Important: if sudo apt install python3-opencv installs it only for default python3, test:
+python3 -c "import cv2; print(cv2.__version__)"
+If python3 works but python3.8 does not, easiest run camera with:
+python3 camera_preview.py --snapshot camera_test.jpg
+I can also add OpenCV to requirements-jetson.txt if you want.
